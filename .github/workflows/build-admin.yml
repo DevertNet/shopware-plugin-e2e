@@ -140,6 +140,8 @@ jobs:
           name: admin-build-${{ matrix.name }}
           path: ${{ env.SHOPWARE_DIR }}/custom/plugins/${{ env.REPOSITORY_NAME }}/${{ inputs.output_dir }}
           if-no-files-found: error
+          # the Vite build of 6.7 needs .vite/entrypoints.json
+          include-hidden-files: true
 
   commit:
     needs: build
