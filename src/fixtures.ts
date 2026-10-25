@@ -11,7 +11,7 @@ export interface FixtureOptions {
   /** Prefix of the plugin's system config keys, e.g. `DevertPdfExport.config.` */
   configPrefix: string;
   /** Known baseline of the plugin config (without prefix). Tests override only what they check. */
-  defaultConfig?: Record<string, string | number>;
+  defaultConfig?: Record<string, string | number | boolean>;
 }
 
 /**
@@ -55,13 +55,19 @@ export class Shop {
     return this.salesChannelUrl.replace(/\/$/, '') + '/' + path.replace(/^\//, '');
   }
 
-  /** Resets the plugin config to the baseline for the test sales channel and applies the overrides. */
-  async configure(overrides: Record<string, string | number> = {}) {
+  /**
+   * Resets the plugin config to the baseline for the test sales channel and applies the overrides.
+   * Keys without a dot belong to the plugin (the prefix is added), keys with a dot are complete system
+   * config keys, e.g. `core.loginRegistration.showAccountTypeSelection`.
+   */
+  async configure(overrides: Record<string, string | number | boolean> = {}) {
     const config = { ...this.options.defaultConfig, ...overrides };
     await this.data.setSystemConfig({
       // the wishlist is disabled on fresh installations
       'core.cart.wishlistEnabled': true,
-      ...Object.fromEntries(Object.entries(config).map(([key, value]) => [this.options.configPrefix + key, value])),
+      ...Object.fromEntries(
+        Object.entries(config).map(([key, value]) => [key.includes('.') ? key : this.options.configPrefix + key, value]),
+      ),
     });
   }
 
