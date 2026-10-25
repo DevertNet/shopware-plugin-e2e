@@ -117,7 +117,9 @@ jobs:
 
       - name: Shopware - Build administration
         run: |
-          cd "$SHOPWARE_DIR" && ./bin/build-administration.sh
+          # With CI set, the script uses bin/ci, which only knows the plugins installed by composer. A plugin in
+          # custom/plugins would be missing in the build, so run it like on a server (with the database).
+          cd "$SHOPWARE_DIR" && env -u CI ./bin/build-administration.sh
 
       - name: Check the plugin build
         run: |
