@@ -1,6 +1,6 @@
 {
   "name": "@devertnet/shopware-plugin-e2e",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shared Playwright setup (config, fixtures, PDF comparison) for the Devert Shopware plugins",
   "license": "UNLICENSED",
   "private": true,

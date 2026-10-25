@@ -121,7 +121,10 @@ jobs:
       - name: Shopware - Prepare files
         run: |
           rm -rf "$SHOPWARE_DIR/.env"
-          cat > "$SHOPWARE_DIR/.env" <<'ENVFILE'
+          # secrets of this throw-away installation are generated for every run
+          APP_SECRET=$(openssl rand -hex 64)
+          INSTANCE_ID=$(openssl rand -hex 16)
+          cat > "$SHOPWARE_DIR/.env" <<ENVFILE
           SHOPWARE_ES_HOSTS="elasticsearch:9200"
           SHOPWARE_ES_ENABLED="0"
           SHOPWARE_ES_INDEXING_ENABLED="0"
@@ -131,8 +134,8 @@ jobs:
           SHOPWARE_CDN_STRATEGY_DEFAULT="id"
           APP_ENV="prod"
           APP_URL="http://127.0.0.1:8000"
-          APP_SECRET="def000009f643e223c9c94d4ecf8b8db6a0dbec9c94b3862fdefeb39984d9e15c62519f8eb9123ffbb5d5a2b113587014c46e6c7642088ef3ca1cd54f2a3b82691a65086"
-          INSTANCE_ID="Cw9lDtS9zhtbPVXFY3tqEhf7UV3bd2Za"
+          APP_SECRET="$APP_SECRET"
+          INSTANCE_ID="$INSTANCE_ID"
           DATABASE_URL="mysql://root:db@127.0.0.1:3307/db"
           LOCK_DSN="flock://var/lock"
           MAILER_DSN="null://null"

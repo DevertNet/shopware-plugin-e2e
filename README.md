@@ -23,11 +23,13 @@ Run locally: `APP_URL=https://shop.ddev.site/ npx playwright test`
 
 ## Private repository
 
-While this repository is private:
+If this repository is private, plugins need two things:
 
 - Settings → Actions → General → Access: allow access from repositories of the owner, so plugins can call the workflow.
 - npm needs a token to fetch the git dependency in CI: create a fine-grained personal access token with read-only
-  *Contents* access to this repository and save it in the plugin repositories (or as organisation secret) as `E2E_REPO_TOKEN`.
+  *Contents* access to this repository and save it in the plugin repositories as `E2E_REPO_TOKEN`.
+
+While the repository is public, neither is needed (the secret is optional).
 
 ## Versions
 
