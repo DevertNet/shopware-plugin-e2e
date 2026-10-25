@@ -124,6 +124,10 @@ jobs:
           dir="$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME/${{ inputs.output_dir }}"
           if [ -z "$(find "$dir" -type f 2>/dev/null | head -1)" ]; then
             echo "The plugin has no admin build in $dir (no administration module?)" >&2
+            echo "--- plugin config of the build (var/plugins.json)" >&2
+            jq --arg name "$REPOSITORY_NAME" '.[] | select(.technicalName | test($name; "i"))' "$SHOPWARE_DIR/var/plugins.json" >&2 || true
+            echo "--- files of the plugin" >&2
+            find "$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME/src/Resources" -maxdepth 4 -not -path '*/views/*' | sort >&2
             exit 1
           fi
           find "$dir" -type f | sort

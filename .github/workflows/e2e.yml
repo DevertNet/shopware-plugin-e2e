@@ -172,7 +172,7 @@ jobs:
         if: inputs.mailpit
         run: |
           docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit:v1.29.7
-          curl --retry 30 --retry-delay 2 --retry-connrefused -sS -o /dev/null http://127.0.0.1:8025/api/v1/info
+          curl --retry 30 --retry-delay 2 --retry-connrefused --retry-all-errors -sS -o /dev/null http://127.0.0.1:8025/api/v1/info
 
       - name: Shopware - Start message queue worker
         run: |
