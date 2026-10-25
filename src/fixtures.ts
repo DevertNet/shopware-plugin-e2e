@@ -134,7 +134,8 @@ export function createTest(options: FixtureOptions): ShopwareTest {
             .poll(
               async () => {
                 await clearDelayedCache(AdminApiContext);
-                return isThemeCompiled(StoreApiContext, DefaultSalesChannel.url);
+                // the query string bypasses the HTTP cache, which can keep serving the page of the uncompiled theme
+                return isThemeCompiled(StoreApiContext, `${DefaultSalesChannel.url}?cache-bust=${Date.now()}`);
               },
               { timeout: 5 * 60_000, intervals: [4_000], message: 'theme compilation' },
             )
