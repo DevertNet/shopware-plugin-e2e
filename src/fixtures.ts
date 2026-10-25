@@ -125,7 +125,11 @@ export function createTest(options: FixtureOptions): ShopwareTest {
     // installation. Wait for it once, before the first test, with a timeout of its own.
     themeReady: [
       async ({ DefaultSalesChannel, SalesChannelBaseConfig, AdminApiContext, StoreApiContext }, use) => {
-        if (!(await isThemeCompiled(StoreApiContext, DefaultSalesChannel.url))) {
+        // Every request below carries a query string: a plain request would let the HTTP cache store the page of the
+        // uncompiled theme, and the suite's own check (StorefrontPage) would keep reading that stale page.
+        const compiled = () =>
+          isThemeCompiled(StoreApiContext, `${DefaultSalesChannel.url}?theme-check=${Date.now()}`);
+        if (!(await compiled())) {
           const assign = await AdminApiContext.post(
             `./_action/theme/${SalesChannelBaseConfig.defaultThemeId}/assign/${DefaultSalesChannel.salesChannel.id}`,
           );
@@ -134,13 +138,15 @@ export function createTest(options: FixtureOptions): ShopwareTest {
             .poll(
               async () => {
                 await clearDelayedCache(AdminApiContext);
-                // the query string bypasses the HTTP cache, which can keep serving the page of the uncompiled theme
-                return isThemeCompiled(StoreApiContext, `${DefaultSalesChannel.url}?cache-bust=${Date.now()}`);
+                return compiled();
               },
               { timeout: 5 * 60_000, intervals: [4_000], message: 'theme compilation' },
             )
             .toBe(true);
         }
+        // drop everything the HTTP cache may have stored while the theme was compiling
+        const clear = await AdminApiContext.delete('./_action/cache');
+        expect(clear.ok(), 'cache clear').toBeTruthy();
         await use();
       },
       { scope: 'worker', auto: true, timeout: 6 * 60_000 },
