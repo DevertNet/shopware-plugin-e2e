@@ -15,6 +15,11 @@ on:
         required: false
         type: string
         default: "8.3"
+      mailpit:
+        description: "Start Mailpit as mail catcher: MAILER_DSN points to it and the tests get MAILPIT_URL"
+        required: false
+        type: boolean
+        default: false
     secrets:
       E2E_REPO_TOKEN:
         description: "Token with read access to the shared e2e repository (needed while it is private and used as git dependency)"
@@ -119,6 +124,8 @@ jobs:
           cd "$SHOPWARE_DIR/vendor/shopware/storefront" && echo "INSTALLED_SW_VERSION=$(grep -oP '(?<=shopware\/core": ")([^"]+)' composer.json)" >> $GITHUB_ENV
 
       - name: Shopware - Prepare files
+        env:
+          MAILER_DSN_VALUE: ${{ inputs.mailpit && 'smtp://127.0.0.1:1025' || 'null://null' }}
         run: |
           rm -rf "$SHOPWARE_DIR/.env"
           # secrets of this throw-away installation are generated for every run
@@ -138,7 +145,7 @@ jobs:
           INSTANCE_ID="$INSTANCE_ID"
           DATABASE_URL="mysql://root:db@127.0.0.1:3307/db"
           LOCK_DSN="flock://var/lock"
-          MAILER_DSN="null://null"
+          MAILER_DSN="$MAILER_DSN_VALUE"
           ENVFILE
 
       - name: Shopware - Install
@@ -160,6 +167,12 @@ jobs:
           cd "$SHOPWARE_DIR" && ./bin/console plugin:install --activate "$REPOSITORY_NAME"
           cd "$SHOPWARE_DIR" && ./bin/console theme:refresh
           cd "$SHOPWARE_DIR" && ./bin/console cache:clear
+
+      - name: Start Mailpit
+        if: inputs.mailpit
+        run: |
+          docker run -d --name mailpit -p 1025:1025 -p 8025:8025 axllent/mailpit:v1.29.7
+          curl --retry 30 --retry-delay 2 --retry-connrefused -sS -o /dev/null http://127.0.0.1:8025/api/v1/info
 
       - name: Shopware - Start message queue worker
         run: |
@@ -212,6 +225,9 @@ jobs:
       - name: Run Playwright
         env:
           APP_URL: http://127.0.0.1:8000/
+          # optional helpers for specs: the shop console (e.g. to run scheduled tasks) and the mail catcher
+          E2E_CONSOLE: php ${{ env.SHOPWARE_DIR }}/bin/console
+          MAILPIT_URL: ${{ inputs.mailpit && 'http://127.0.0.1:8025' || '' }}
         run: npx playwright test
 
       - name: Compare PDFs with reference

@@ -1,0 +1,189 @@
+name: Shopware plugin admin build
+
+# Reusable workflow: builds the administration module of a plugin with Shopware 6.6 (webpack) and 6.7 (Vite)
+# and commits both builds to the plugin. The builds write different files (js/ and css/ for 6.6, assets/ and
+# .vite/ for 6.7), so one plugin version works with both Shopware versions.
+#
+# The calling job needs `permissions: contents: write` (and `actions: write` for `dispatch_workflows`).
+on:
+  workflow_call:
+    inputs:
+      output_dir:
+        description: "Directory of the plugin that receives the builds"
+        required: false
+        type: string
+        default: "src/Resources/public/administration"
+      dispatch_workflows:
+        description: "Workflow files (separated by spaces) to start after a commit, e.g. `test.yml build.yml`: a push with the workflow token does not start workflows. They need `workflow_dispatch`."
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    name: Admin build (Shopware ${{ matrix.name }})
+    strategy:
+      matrix:
+        include:
+          - name: "6.6"
+            shopware: "6.6.*"
+            php: "8.4"
+          - name: "6.7"
+            shopware: "6.7.*"
+            php: "8.3"
+      fail-fast: true
+
+    env:
+      SHOPWARE_DIR: ${{ github.workspace }}/.shopware
+
+    services:
+      mariadb:
+        image: mariadb:11.4
+        ports:
+          - 3307:3306
+        env:
+          MYSQL_ROOT_PASSWORD: db
+          MYSQL_DATABASE: db
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Add REPOSITORY_NAME to ENV
+        run: echo "REPOSITORY_NAME=${{ github.event.repository.name }}" >> $GITHUB_ENV
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: ctype, curl, dom, fileinfo, gd, iconv, intl, mbstring, openssl, pdo, pdo_mysql, simplexml, sodium, xml, zip
+          ini-values: memory_limit=1G
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Shopware - Fetch via Flex
+        env:
+          SW_CONSTRAINT: ${{ matrix.shopware }}
+        run: |
+          composer create-project shopware/production "$SHOPWARE_DIR" "$SW_CONSTRAINT" --no-interaction
+
+      - name: Shopware - Prepare files and install
+        run: |
+          rm -rf "$SHOPWARE_DIR/.env"
+          APP_SECRET=$(openssl rand -hex 64)
+          INSTANCE_ID=$(openssl rand -hex 16)
+          cat > "$SHOPWARE_DIR/.env" <<ENVFILE
+          SHOPWARE_ES_ENABLED="0"
+          SHOPWARE_ES_INDEXING_ENABLED="0"
+          SHOPWARE_HTTP_CACHE_ENABLED="1"
+          APP_ENV="prod"
+          APP_URL="http://127.0.0.1:8000"
+          APP_SECRET="$APP_SECRET"
+          INSTANCE_ID="$INSTANCE_ID"
+          DATABASE_URL="mysql://root:db@127.0.0.1:3307/db"
+          LOCK_DSN="flock://var/lock"
+          MAILER_DSN="null://null"
+          ENVFILE
+          cd "$SHOPWARE_DIR" && ./bin/console system:install --basic-setup --create-database --force
+
+      - name: Shopware - Copy & Install Plugin
+        run: |
+          mkdir -p "$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME"
+          if [ -f build.sh ]; then
+            ./build.sh "$REPOSITORY_NAME"
+            rsync -a "dist/$REPOSITORY_NAME/" "$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME/"
+          else
+            rsync -a --exclude='.git' --exclude='.github' --exclude='node_modules' --exclude='e2e' --exclude='.shopware' ./ "$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME/"
+          fi
+          # only the build of this Shopware version, without the one of the other version
+          rm -rf "$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME/${{ inputs.output_dir }}"
+          cd "$SHOPWARE_DIR" && ./bin/console plugin:refresh
+          cd "$SHOPWARE_DIR" && ./bin/console plugin:install --activate "$REPOSITORY_NAME"
+          cd "$SHOPWARE_DIR" && ./bin/console cache:clear
+
+      - name: Shopware - Build administration
+        run: |
+          cd "$SHOPWARE_DIR" && ./bin/build-administration.sh
+
+      - name: Check the plugin build
+        run: |
+          dir="$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME/${{ inputs.output_dir }}"
+          if [ -z "$(find "$dir" -type f 2>/dev/null | head -1)" ]; then
+            echo "The plugin has no admin build in $dir (no administration module?)" >&2
+            exit 1
+          fi
+          find "$dir" -type f | sort
+
+      - name: Artifact - Upload build
+        uses: actions/upload-artifact@v7
+        with:
+          name: admin-build-${{ matrix.name }}
+          path: ${{ env.SHOPWARE_DIR }}/custom/plugins/${{ env.REPOSITORY_NAME }}/${{ inputs.output_dir }}
+          if-no-files-found: error
+
+  commit:
+    needs: build
+    runs-on: ubuntu-24.04
+    name: Commit builds
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download builds
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/admin-builds
+
+      - name: Merge both builds into the plugin
+        env:
+          OUTPUT_DIR: ${{ inputs.output_dir }}
+        run: |
+          rm -rf "$OUTPUT_DIR"
+          mkdir -p "$OUTPUT_DIR"
+          for build in "$RUNNER_TEMP"/admin-builds/admin-build-*; do
+            rsync -a "$build/" "$OUTPUT_DIR/"
+          done
+          find "$OUTPUT_DIR" -type f | sort
+
+      - name: Commit changes
+        id: commit
+        env:
+          OUTPUT_DIR: ${{ inputs.output_dir }}
+        run: |
+          git add --all "$OUTPUT_DIR"
+          if git diff --cached --quiet; then
+            echo "Admin builds are up to date"
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: build administration (Shopware 6.6 and 6.7)"
+          git push
+          echo "committed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Start follow-up workflows
+        if: steps.commit.outputs.committed == 'true' && inputs.dispatch_workflows != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOWS: ${{ inputs.dispatch_workflows }}
+        run: |
+          for workflow in $WORKFLOWS; do
+            gh workflow run "$workflow" --ref "${{ github.ref_name }}"
+          done
