@@ -1,0 +1,249 @@
+name: Shopware plugin E2E
+
+# Reusable workflow: installs Shopware (6.6 + 6.7, or one explicit version), installs the calling plugin and
+# runs its Playwright tests (e2e/). Usage: see README.md.
+on:
+  workflow_call:
+    inputs:
+      shopware_version:
+        description: "Explicit Shopware version (composer constraint for shopware/production), e.g. 6.8.0.0-rc1 or 6.8.*. Empty = default matrix."
+        required: false
+        type: string
+        default: ""
+      php_version:
+        description: "PHP version for the explicit Shopware version"
+        required: false
+        type: string
+        default: "8.3"
+    secrets:
+      E2E_REPO_TOKEN:
+        description: "Token with read access to the shared e2e repository (needed while it is private and used as git dependency)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    name: Build matrix
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        env:
+          INPUT_SHOPWARE_VERSION: ${{ inputs.shopware_version }}
+          INPUT_PHP_VERSION: ${{ inputs.php_version }}
+        run: |
+          if [ -n "$INPUT_SHOPWARE_VERSION" ]; then
+            if ! [[ "$INPUT_SHOPWARE_VERSION" =~ ^[0-9A-Za-z.*_-]+$ && "${INPUT_PHP_VERSION:-8.3}" =~ ^[0-9.]+$ ]]; then
+              echo "Invalid shopware_version or php_version" >&2
+              exit 1
+            fi
+            slug=$(echo "$INPUT_SHOPWARE_VERSION" | tr -c 'A-Za-z0-9\n' '-' | sed 's/-*$//')
+            matrix="{\"include\":[{\"name\":\"$slug\",\"shopware\":\"$INPUT_SHOPWARE_VERSION\",\"php\":\"${INPUT_PHP_VERSION:-8.3}\",\"explicit\":true}]}"
+          else
+            matrix='{"include":[{"name":"6.6","shopware":"6.6.*","php":"8.4","explicit":false},{"name":"6.7","shopware":"6.7.*","php":"8.3","explicit":false}]}'
+          fi
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  playwright:
+    needs: matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    name: Playwright (Shopware ${{ matrix.name }})
+    strategy:
+      matrix: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+      fail-fast: false
+
+    env:
+      SHOPWARE_DIR: ${{ github.workspace }}/.shopware
+
+    services:
+      mariadb:
+        image: mariadb:11.4
+        ports:
+          - 3307:3306
+        env:
+          MYSQL_ROOT_PASSWORD: db
+          MYSQL_DATABASE: db
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Add REPOSITORY_NAME to ENV
+        run: echo "REPOSITORY_NAME=${{ github.event.repository.name }}" >> $GITHUB_ENV
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: ctype, curl, dom, fileinfo, gd, iconv, intl, mbstring, openssl, pdo, pdo_mysql, simplexml, sodium, xml, zip
+          ini-values: memory_limit=1G
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Get Composer Cache Directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache Composer Directory
+        uses: actions/cache@v6
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ matrix.name }}-${{ github.run_id }}
+          restore-keys: ${{ runner.os }}-composer-${{ matrix.name }}-
+
+      - name: Shopware - Fetch via Flex
+        env:
+          SW_CONSTRAINT: ${{ matrix.shopware }}
+          # allow pre-releases (e.g. rc versions) only when a version was requested explicitly
+          SW_STABILITY: ${{ matrix.explicit && 'RC' || 'stable' }}
+        run: |
+          composer create-project shopware/production "$SHOPWARE_DIR" "$SW_CONSTRAINT" --stability="$SW_STABILITY" --no-interaction
+
+      - name: Shopware - Read Version
+        run: |
+          cd "$SHOPWARE_DIR/vendor/shopware/storefront" && echo "INSTALLED_SW_VERSION=$(grep -oP '(?<=shopware\/core": ")([^"]+)' composer.json)" >> $GITHUB_ENV
+
+      - name: Shopware - Prepare files
+        run: |
+          rm -rf "$SHOPWARE_DIR/.env"
+          cat > "$SHOPWARE_DIR/.env" <<'ENVFILE'
+          SHOPWARE_ES_HOSTS="elasticsearch:9200"
+          SHOPWARE_ES_ENABLED="0"
+          SHOPWARE_ES_INDEXING_ENABLED="0"
+          SHOPWARE_ES_INDEX_PREFIX="sw"
+          SHOPWARE_HTTP_CACHE_ENABLED="1"
+          SHOPWARE_HTTP_DEFAULT_TTL="7200"
+          SHOPWARE_CDN_STRATEGY_DEFAULT="id"
+          APP_ENV="prod"
+          APP_URL="http://127.0.0.1:8000"
+          APP_SECRET="def000009f643e223c9c94d4ecf8b8db6a0dbec9c94b3862fdefeb39984d9e15c62519f8eb9123ffbb5d5a2b113587014c46e6c7642088ef3ca1cd54f2a3b82691a65086"
+          INSTANCE_ID="Cw9lDtS9zhtbPVXFY3tqEhf7UV3bd2Za"
+          DATABASE_URL="mysql://root:db@127.0.0.1:3307/db"
+          LOCK_DSN="flock://var/lock"
+          MAILER_DSN="null://null"
+          ENVFILE
+
+      - name: Shopware - Install
+        run: |
+          cd "$SHOPWARE_DIR" && ./bin/console system:install --basic-setup --create-database --force
+          cd "$SHOPWARE_DIR" && ./bin/console cache:clear
+
+      - name: Shopware - Copy & Install Plugin
+        run: |
+          mkdir -p "$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME"
+          if [ -f build.sh ]; then
+            # same content as the store zip
+            ./build.sh "$REPOSITORY_NAME"
+            rsync -a "dist/$REPOSITORY_NAME/" "$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME/"
+          else
+            rsync -a --exclude='.git' --exclude='.github' --exclude='node_modules' --exclude='e2e' --exclude='.shopware' ./ "$SHOPWARE_DIR/custom/plugins/$REPOSITORY_NAME/"
+          fi
+          cd "$SHOPWARE_DIR" && ./bin/console plugin:refresh
+          cd "$SHOPWARE_DIR" && ./bin/console plugin:install --activate "$REPOSITORY_NAME"
+          cd "$SHOPWARE_DIR" && ./bin/console theme:refresh
+          cd "$SHOPWARE_DIR" && ./bin/console cache:clear
+
+      - name: Shopware - Start message queue worker
+        run: |
+          cd "$SHOPWARE_DIR"
+          nohup ./bin/console messenger:consume async low_priority --time-limit=1500 > "$RUNNER_TEMP/worker.log" 2>&1 &
+
+      - name: Shopware - Start web server
+        run: |
+          cd "$SHOPWARE_DIR/public"
+          PHP_CLI_SERVER_WORKERS=4 nohup php -S 127.0.0.1:8000 > "$RUNNER_TEMP/php-server.log" 2>&1 &
+          curl --retry 30 --retry-delay 2 --retry-connrefused -sS -o /dev/null http://127.0.0.1:8000
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+
+      - name: Allow npm to fetch the private shared e2e repository
+        if: env.E2E_REPO_TOKEN != ''
+        env:
+          E2E_REPO_TOKEN: ${{ secrets.E2E_REPO_TOKEN }}
+        run: |
+          git config --global --add url."https://x-access-token:${E2E_REPO_TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --add url."https://x-access-token:${E2E_REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install Playwright
+        run: |
+          npm ci
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
+
+      - name: Run Playwright
+        env:
+          APP_URL: http://127.0.0.1:8000/
+        run: npx playwright test
+
+      - name: Compare PDFs with reference
+        if: always()
+        run: npm run compare
+
+      - name: Handle Playwright Failure
+        if: failure()
+        run: |
+          echo "❌ Playwright Tests failed!"
+          cat "$RUNNER_TEMP/php-server.log" || true
+          cat "$RUNNER_TEMP/worker.log" || true
+          find "$SHOPWARE_DIR/var/log" -name "*.log" -exec cat {} \; || true
+
+      - name: Artifact - Upload Playwright Report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-${{ matrix.name }}
+          path: |
+            ./e2e/report/
+            ./e2e/results/
+          if-no-files-found: ignore
+
+      - name: Artifact - Upload PDFs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          # e2e/output/compare/index.html: old, new and a diff with changes in red
+          name: compare-pdfs-${{ matrix.name }}
+          path: ./e2e/output/
+          if-no-files-found: ignore
+
+      - name: Name PDF comparison image
+        if: always()
+        run: cp e2e/output/compare/report.png "e2e/output/compare-report-${{ matrix.name }}.png"
+
+      - name: Artifact - Upload PDF comparison image (not archived)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          # archive: false uploads the file as is (the file name is the artifact name), so it can be opened directly
+          path: ./e2e/output/compare-report-${{ matrix.name }}.png
+          archive: false
+          if-no-files-found: ignore
+
+      - name: Artifact - Upload Version Info
+        uses: actions/upload-artifact@v7
+        with:
+          name: shopware-${{ env.INSTALLED_SW_VERSION }}
+          path: ${{ env.SHOPWARE_DIR }}/vendor/shopware/core/composer.json

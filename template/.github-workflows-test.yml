@@ -1,0 +1,32 @@
+name: E2E Test
+on:
+  push:
+  schedule:
+    - cron: "0 15 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      shopware_version:
+        description: "Explicit Shopware version (composer constraint), e.g. 6.8.0.0-rc1 or 6.8.*. Empty = 6.6 + 6.7."
+        required: false
+        type: string
+      php_version:
+        description: "PHP version for the explicit Shopware version"
+        required: false
+        default: "8.3"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    uses: DevertNet/shopware-plugin-e2e/.github/workflows/e2e.yml@v1
+    with:
+      shopware_version: ${{ inputs.shopware_version }}
+      php_version: ${{ inputs.php_version }}
+    secrets:
+      E2E_REPO_TOKEN: ${{ secrets.E2E_REPO_TOKEN }}

@@ -1,0 +1,37 @@
+{
+  "name": "@devertnet/shopware-plugin-e2e",
+  "version": "1.0.0",
+  "description": "Shared Playwright setup (config, fixtures, PDF comparison) for the Devert Shopware plugins",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./config": { "types": "./dist/config.d.ts", "default": "./dist/config.js" },
+    "./fixtures": { "types": "./dist/fixtures.d.ts", "default": "./dist/fixtures.js" }
+  },
+  "bin": {
+    "devert-compare-pdfs": "bin/compare-pdfs.mjs"
+  },
+  "files": ["dist", "bin"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^4.10.38",
+    "pixelmatch": "^8.0.0",
+    "pngjs": "^7.0.0"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.62.1",
+    "@shopware-ag/acceptance-test-suite": "^12.25.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@shopware-ag/acceptance-test-suite": "^12.25.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.6.0"
+  }
+}
