@@ -168,8 +168,21 @@ jobs:
 
       - name: Shopware - Start web server
         run: |
+          # Router script: without it the built-in server treats URLs like /product/SW-1.1 (a dot in the last segment)
+          # as static files and answers 404. Real files are served as they are, everything else goes to Shopware.
+          cat > "$RUNNER_TEMP/router.php" <<'ROUTER'
+          <?php
+          $root = $_SERVER['DOCUMENT_ROOT'];
+          $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+          if ($path !== '/' && is_file($root . $path)) {
+              return false;
+          }
+          $_SERVER['SCRIPT_NAME'] = '/index.php';
+          $_SERVER['SCRIPT_FILENAME'] = $root . '/index.php';
+          require $root . '/index.php';
+          ROUTER
           cd "$SHOPWARE_DIR/public"
-          PHP_CLI_SERVER_WORKERS=4 nohup php -S 127.0.0.1:8000 > "$RUNNER_TEMP/php-server.log" 2>&1 &
+          PHP_CLI_SERVER_WORKERS=4 nohup php -S 127.0.0.1:8000 -t "$SHOPWARE_DIR/public" "$RUNNER_TEMP/router.php" > "$RUNNER_TEMP/php-server.log" 2>&1 &
           curl --retry 30 --retry-delay 2 --retry-connrefused -sS -o /dev/null http://127.0.0.1:8000
 
       - name: Cache Playwright browsers
@@ -203,7 +216,13 @@ jobs:
 
       - name: Compare PDFs with reference
         if: always()
-        run: npm run compare
+        run: |
+          # only plugins with PDF tests have generated PDFs
+          if [ -d e2e/output/pdfs ]; then
+            npm run compare
+          else
+            echo "No PDFs generated, nothing to compare"
+          fi
 
       - name: Handle Playwright Failure
         if: failure()
@@ -233,7 +252,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Name PDF comparison image
-        if: always()
+        if: always() && hashFiles('e2e/output/compare/report.png') != ''
         run: cp e2e/output/compare/report.png "e2e/output/compare-report-${{ matrix.name }}.png"
 
       - name: Artifact - Upload PDF comparison image (not archived)
