@@ -1,4 +1,4 @@
-name: Shopware plugin admin build
+name: Build Admin Js
 
 # Reusable workflow: builds the administration module of a plugin with Shopware 6.6 (webpack) and 6.7 (Vite)
 # and commits both builds to the plugin. The builds write different files (js/ and css/ for 6.6, assets/ and

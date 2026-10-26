@@ -33,7 +33,7 @@ that only change the admin sources, because the build workflow starts them with 
 
 ```yaml
 # .github/workflows/build-admin.yml
-name: Build admin
+name: Build Admin Js
 on:
   push:
     branches-ignore: [master-v6.5]
