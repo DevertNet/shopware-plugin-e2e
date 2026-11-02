@@ -15,6 +15,11 @@ on:
         required: false
         type: string
         default: "8.3"
+      features:
+        description: "Shopware feature flags to enable for the run, space separated, e.g. 'JSON_LD_DATA BREADCRUMB_REWORK'. Written as environment variables to the .env of the test shop. Empty = Shopware defaults."
+        required: false
+        type: string
+        default: ""
       mailpit:
         description: "Start Mailpit as mail catcher: MAILER_DSN points to it and the tests get MAILPIT_URL"
         required: false
@@ -39,16 +44,26 @@ jobs:
         env:
           INPUT_SHOPWARE_VERSION: ${{ inputs.shopware_version }}
           INPUT_PHP_VERSION: ${{ inputs.php_version }}
+          INPUT_FEATURES: ${{ inputs.features }}
         run: |
+          if ! [[ "$INPUT_FEATURES" =~ ^[A-Za-z0-9_.\ ]*$ ]]; then
+            echo "Invalid features" >&2
+            exit 1
+          fi
+          # job and artifact names carry the flags, so runs with different flags do not collide
+          fslug=$(echo "$INPUT_FEATURES" | tr -c 'A-Za-z0-9\n' '-' | sed 's/-*$//')
           if [ -n "$INPUT_SHOPWARE_VERSION" ]; then
             if ! [[ "$INPUT_SHOPWARE_VERSION" =~ ^[0-9A-Za-z.*_-]+$ && "${INPUT_PHP_VERSION:-8.3}" =~ ^[0-9.]+$ ]]; then
               echo "Invalid shopware_version or php_version" >&2
               exit 1
             fi
             slug=$(echo "$INPUT_SHOPWARE_VERSION" | tr -c 'A-Za-z0-9\n' '-' | sed 's/-*$//')
+            [ -n "$fslug" ] && slug="$slug-$fslug"
             matrix="{\"include\":[{\"name\":\"$slug\",\"shopware\":\"$INPUT_SHOPWARE_VERSION\",\"php\":\"${INPUT_PHP_VERSION:-8.3}\",\"explicit\":true}]}"
           else
-            matrix='{"include":[{"name":"6.6","shopware":"6.6.*","php":"8.4","explicit":false},{"name":"6.7","shopware":"6.7.*","php":"8.3","explicit":false}]}'
+            suffix=""
+            [ -n "$fslug" ] && suffix="-$fslug"
+            matrix="{\"include\":[{\"name\":\"6.6$suffix\",\"shopware\":\"6.6.*\",\"php\":\"8.4\",\"explicit\":false},{\"name\":\"6.7$suffix\",\"shopware\":\"6.7.*\",\"php\":\"8.3\",\"explicit\":false}]}"
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
@@ -126,6 +141,7 @@ jobs:
       - name: Shopware - Prepare files
         env:
           MAILER_DSN_VALUE: ${{ inputs.mailpit && 'smtp://127.0.0.1:1025' || 'null://null' }}
+          FEATURES: ${{ inputs.features }}
         run: |
           rm -rf "$SHOPWARE_DIR/.env"
           # secrets of this throw-away installation are generated for every run
@@ -147,6 +163,10 @@ jobs:
           LOCK_DSN="flock://var/lock"
           MAILER_DSN="$MAILER_DSN_VALUE"
           ENVFILE
+          # feature flags are read from the environment by name (unknown flags are ignored by older Shopware versions)
+          for feature in $FEATURES; do
+            echo "$feature=\"1\"" >> "$SHOPWARE_DIR/.env"
+          done
 
       - name: Shopware - Install
         run: |

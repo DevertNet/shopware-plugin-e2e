@@ -67,6 +67,26 @@ after the build workflow.
 
 Locally: `MAILPIT_URL=http://shopware67.ddev.site:8025 E2E_CONSOLE="ddev exec --dir /var/www/html bin/console" npx playwright test`
 
+## Feature flags
+
+`features` enables Shopware feature flags for the whole run (space separated, names are validated). They are written to the
+`.env` of the test shop as `NAME="1"`. Job and artifact names get the flags as suffix, so a plugin can call the workflow
+several times with different flags:
+
+```yaml
+jobs:
+  e2e-flags:
+    strategy:
+      matrix:
+        features: ["JSON_LD_DATA", "BREADCRUMB_REWORK", "JSON_LD_DATA BREADCRUMB_REWORK"]
+    uses: DevertNet/shopware-plugin-e2e/.github/workflows/e2e.yml@v1
+    with:
+      shopware_version: "6.7.*"
+      features: ${{ matrix.features }}
+```
+
+Unknown flags are ignored by Shopware versions that do not have them. Without `features` nothing changes.
+
 ## Private repository
 
 If this repository is private, plugins need two things:
