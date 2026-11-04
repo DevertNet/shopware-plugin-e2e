@@ -100,10 +100,21 @@ export class Shop {
     await this.openProduct(productId);
     const action = this.page.locator('.product-wishlist-action');
     await expect(action).toBeVisible();
-    if (!(await action.evaluate((el) => el.classList.contains('product-wishlist-added')))) {
-      await action.click();
-      await expect(action).toHaveClass(/product-wishlist-added/);
-    }
+    // The storefront loads the wishlist of a customer from the server after the page is ready. When that response
+    // arrives after the product was added, it overwrites the button state with the old list: the product is on
+    // the server, but the button says "not added" (and another click is refused as duplicate). A reload shows the
+    // state of the server. If the product is not there, the click was lost and is repeated.
+    await expect(async () => {
+      if (!(await action.evaluate((el) => el.classList.contains('product-wishlist-added')))) {
+        await action.click();
+      }
+      try {
+        await expect(action).toHaveClass(/product-wishlist-added/, { timeout: 3_000 });
+      } catch {
+        await this.page.reload();
+        await expect(action).toHaveClass(/product-wishlist-added/, { timeout: 5_000 });
+      }
+    }).toPass({ timeout: 30_000 });
   }
 }
 
