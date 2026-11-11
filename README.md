@@ -44,7 +44,7 @@ jobs:
     permissions:
       contents: write
       actions: write
-    uses: DevertNet/shopware-plugin-e2e/.github/workflows/build-admin.yml@v1
+    uses: DevertNet/shopware-plugin-e2e/.github/workflows/build-admin.yml@v1.4.0
     with:
       dispatch_workflows: test.yml build.yml # need `workflow_dispatch`
 
@@ -79,7 +79,7 @@ jobs:
     strategy:
       matrix:
         features: ["JSON_LD_DATA", "BREADCRUMB_REWORK", "JSON_LD_DATA BREADCRUMB_REWORK"]
-    uses: DevertNet/shopware-plugin-e2e/.github/workflows/e2e.yml@v1
+    uses: DevertNet/shopware-plugin-e2e/.github/workflows/e2e.yml@v1.4.0
     with:
       shopware_version: "6.7.*"
       features: ${{ matrix.features }}
@@ -99,5 +99,9 @@ While the repository is public, neither is needed (the secret is optional).
 
 ## Versions
 
-Plugins reference `@v1` (workflow and package). Compatible changes go into `v1` (the tag is moved), breaking changes get `v2`.
-Release: `git tag -f v1 && git push -f origin v1` (plus the exact version tag, e.g. `v1.0.0`).
+Plugins reference a release tag in their workflows, e.g. `@v1.4.0`. Bump the ref in the calling workflow
+(`.github/workflows/test.yml`, `.github/workflows/build-admin.yml`) when you upgrade.
+The npm package is referenced separately as `github:DevertNet/shopware-plugin-e2e#v1` and pinned by
+commit in `package-lock.json`, so it does not follow the workflow ref automatically.
+
+Release: bump `version` in `package.json`, then `git tag v1.4.0 && git push origin v1.4.0`.

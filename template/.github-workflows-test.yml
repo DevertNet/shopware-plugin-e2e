@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   e2e:
-    uses: DevertNet/shopware-plugin-e2e/.github/workflows/e2e.yml@v1
+    uses: DevertNet/shopware-plugin-e2e/.github/workflows/e2e.yml@v1.4.0
     with:
       shopware_version: ${{ inputs.shopware_version }}
       php_version: ${{ inputs.php_version }}
