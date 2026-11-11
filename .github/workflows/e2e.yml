@@ -132,7 +132,15 @@ jobs:
           # allow pre-releases (e.g. rc versions) only when a version was requested explicitly
           SW_STABILITY: ${{ matrix.explicit && 'RC' || 'stable' }}
         run: |
-          composer create-project shopware/production "$SHOPWARE_DIR" "$SW_CONSTRAINT" --stability="$SW_STABILITY" --no-interaction
+          # Composer refuses to install package versions that are affected by a security advisory
+          # (default since 2.9/2.10, `--no-blocking` available since 2.10). shopware/core 6.7.16.0
+          # pins mcp/sdk ^0.8.1, and that whole 0.8.x line is covered by PKSA-s52d-n7sx-trsg
+          # (GHSA-f4rf-6ghj-mhr6, fixed in 0.9.0, which core does not allow yet). Without this flag
+          # `create-project` dies with "Your requirements could not be resolved" before anything runs.
+          # The shop installed here is throw-away, so blocking is disabled for this single command;
+          # `composer audit` still reports the advisory.
+          composer create-project shopware/production "$SHOPWARE_DIR" "$SW_CONSTRAINT" \
+            --stability="$SW_STABILITY" --no-interaction --no-blocking
 
       - name: Shopware - Read Version
         run: |

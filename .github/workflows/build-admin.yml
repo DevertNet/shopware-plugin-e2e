@@ -79,7 +79,10 @@ jobs:
         env:
           SW_CONSTRAINT: ${{ matrix.shopware }}
         run: |
-          composer create-project shopware/production "$SHOPWARE_DIR" "$SW_CONSTRAINT" --no-interaction
+          # see e2e.yml: shopware/core 6.7.16.0 pins mcp/sdk ^0.8.1, which is blocked by
+          # PKSA-s52d-n7sx-trsg - Composer refuses to resolve it unless blocking is off
+          composer create-project shopware/production "$SHOPWARE_DIR" "$SW_CONSTRAINT" \
+            --no-interaction --no-blocking
 
       - name: Shopware - Prepare files and install
         run: |
